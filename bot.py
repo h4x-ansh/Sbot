@@ -480,14 +480,18 @@ async def read_owo_coin_flips(channel):
 from prediction_helpers import get_results_sequence, markov_predict, decision_from_prediction, get_last_choice
 
 def analyze_coin_flip_probability(flips=None):
-    \"\"\"Pattern-based W/L prediction using Markov chains.\"\"\"
+    """Pattern-based W/L prediction using Markov chains."""
+    from prediction_helpers import markov_predict, decision_from_prediction, get_last_choice
     results = get_results_sequence()
     if len(results) < 10:
         return {'predicted': 'INSUFFICIENT DATA', 'confidence': 0, 'pattern': '', 'total': 0}
     
     pred, conf, pattern = markov_predict(results)
+    # Convert W/L to H/T suggestion
+    last_choice = get_last_choice()
+    choice = decision_from_prediction(pred, last_choice)
     return {
-        'predicted': pred,
+        'predicted': choice,
         'confidence': conf,
         'pattern': pattern,
         'total': len(results)

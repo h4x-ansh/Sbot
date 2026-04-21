@@ -45,6 +45,11 @@ def markov_predict(results_seq, orders=[2,3,4]):
     avg_prob_w = w_votes / total_weight
     pred = 'WIN' if avg_prob_w > 0.5 else 'LOSS'
     conf = min(abs(avg_prob_w - 0.5) * 200, 100)
+    
+    # LOW DATA FIX: Penalize confidence if insufficient evidence
+    if total_weight < 5:
+        conf *= 0.5
+    
     pattern = ' '.join(results_seq[-4:])
     
     return pred, conf, pattern
@@ -63,8 +68,9 @@ def get_last_choice():
 
 def decision_from_prediction(pred, last_choice=None):
     """Convert WIN/LOSS pred to suggested choice (repeat/switch)."""
+    import random
     if last_choice is None:
-        last_choice = get_last_choice()
+        last_choice = random.choice(["heads", "tails"])
     if pred == 'WIN':
         return last_choice
     else:
