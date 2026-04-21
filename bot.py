@@ -477,146 +477,30 @@ async def read_owo_coin_flips(channel):
     return list(reversed(owo_results))  # Return in chronological order
 
 
+from prediction_helpers import get_results_sequence, markov_predict, decision_from_prediction, get_last_choice
+
 def analyze_coin_flip_probability(flips=None):
-    """Analyze which CHOICE leads to more WINS, then predict that choice."""
-    if flips is None:
-        flips = get_last_25_flips()
+    \"\"\"Pattern-based W/L prediction using Markov chains.\"\"\"
+    results = get_results_sequence()
+    if len(results) < 10:
+        return {'predicted': 'INSUFFICIENT DATA', 'confidence': 0, 'pattern': '', 'total': 0}
     
-    if not flips:
-        return None
-    
-    # Separate by choice and count wins/losses for each
-    heads_flips = [flip for flip in flips if flip[0] == "heads"]
-    tails_flips = [flip for flip in flips if flip[0] == "tails"]
-    
-    # Count wins for each choice
-    heads_wins = sum(1 for flip in heads_flips if flip[1] == "won")
-    heads_total = len(heads_flips)
-    heads_win_rate = (heads_wins / heads_total * 100) if heads_total > 0 else 0
-    
-    tails_wins = sum(1 for flip in tails_flips if flip[1] == "won")
-    tails_total = len(tails_flips)
-    tails_win_rate = (tails_wins / tails_total * 100) if tails_total > 0 else 0
-    
-    # Predict the choice with HIGHER WIN RATE
-    predicted = "heads" if heads_win_rate >= tails_win_rate else "tails"
-    confidence = abs(heads_win_rate - tails_win_rate)
-    
+    pred, conf, pattern = markov_predict(results)
     return {
-        "heads_wins": heads_wins,
-        "heads_total": heads_total,
-        "heads_win_rate": heads_win_rate,
-        "tails_wins": tails_wins,
-        "tails_total": tails_total,
-        "tails_win_rate": tails_win_rate,
-        "predicted": predicted,
-        "confidence": confidence,
-        "total": len(flips),
+        'predicted': pred,
+        'confidence': conf,
+        'pattern': pattern,
+        'total': len(results)
     }
 
 
-def get_all_flips():
-    """Get all flips from database for pattern analysis."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT chosen FROM coin_flips ORDER BY id ASC")
-    results = cursor.fetchall()
-    conn.close()
-    return [flip[0][0].upper() for flip in results]  # Return H or T
+# REMOVED: get_all_flips() - no longer needed for W/L only prediction
 
 
-def analyze_sequence_patterns(sequence_length=3):
-    """Analyze repeating patterns in chosen sequence."""
-    choices = get_all_flips()
-    
-    if len(choices) < sequence_length:
-        return None
-    
-    # Extract all N-grams
-    sequences = {}
-    for i in range(len(choices) - sequence_length + 1):
-        pattern = "".join(choices[i:i + sequence_length])
-        if pattern not in sequences:
-            sequences[pattern] = {"count": 0, "follows": {}}
-        sequences[pattern]["count"] += 1
-        
-        # Track what comes after this pattern
-        if i + sequence_length < len(choices):
-            next_choice = choices[i + sequence_length]
-            sequences[pattern]["follows"][next_choice] = sequences[pattern]["follows"].get(next_choice, 0) + 1
-    
-    return sequences
+# REMOVED: analyze_sequence_patterns() - replaced by markov_predict()
 
 
-def get_pattern_prediction():
-    """Predict next flip based on sequence patterns."""
-    choices = get_all_flips()
-    
-    if len(choices) < 3:
-        return None
-    
-    # Get current pattern (last 3 flips)
-    current_pattern = "".join(choices[-3:])
-    
-    # Analyze all sequences to find pattern
-    sequences = analyze_sequence_patterns(3)
-    
-    if current_pattern not in sequences:
-        return None
-    
-    pattern_data = sequences[current_pattern]
-    
-    if not pattern_data["follows"]:
-        return None
-    
-    # Find which continuation is most frequent
-    most_common = max(pattern_data["follows"].items(), key=lambda x: x[1])
-    predicted_choice = most_common[0]
-    frequency = most_common[1]
-    
-    # Calculate confidence as percentage
-    total_continuations = sum(pattern_data["follows"].values())
-    confidence = (frequency / total_continuations) * 100
-    
-    return {
-        "pattern": current_pattern,
-        "predicted": predicted_choice,
-        "frequency": frequency,
-        "total": total_continuations,
-        "confidence": confidence,
-        "pattern_count": pattern_data["count"],
-    }
-
-
-def predict_next_outcome():
-    """Predict next actual coin outcome (not choice) based on won/lost results."""
-    flips = get_last_25_flips()
-
-    if len(flips) < 10:
-        return "Not enough data", 0
-
-    # Extract actual outcomes based on results
-    # If WON → actual outcome matched what was chosen
-    # If LOST → actual outcome was opposite of chosen
-    outcomes = []
-
-    for chosen, result in flips:
-        if result == "won":
-            outcomes.append("H" if chosen == "heads" else "T")
-        else:
-            outcomes.append("T" if chosen == "heads" else "H")
-
-    # Count last 10 outcomes
-    recent = outcomes[-10:]
-    heads = recent.count("H")
-    tails = recent.count("T")
-
-    total = len(recent)
-
-    if heads > tails:
-        return "HEADS", round(heads/total*100, 2)
-    else:
-        return "TAILS", round(tails/total*100, 2)
+# REMOVED: get_pattern_prediction() - replaced by new logic
 
 
 @bot.command(name="cf")
@@ -700,20 +584,18 @@ async def coin_flip_stats_command(ctx):
         await ctx.send("No flip data yet! Use `!cf` to start the system.")
         return
     
-    flips = get_last_25_flips()
-    
-    # Create display showing chosen vs result
-    results_display = " ".join([f"{'H' if flip[0] == 'heads' else 'T'}" for flip in flips])
-    chosen_display = " ".join([f"{'W' if flip[1] == 'won' else 'L'}" for flip in flips])
+    from prediction_helpers import get_results_sequence
+    wl_seq = get_results_sequence(25)
+    wl_display = " ".join(wl_seq)
     
     embed = discord.Embed(
-        title="Coin Flip Statistics",
+        title="📊 W/L Pattern Statistics",
         color=discord.Color.purple(),
     )
     
     embed.add_field(
         name="Flips Recorded",
-        value=f"{flip_count} flips",
+    value=f"{flip_count} results analyzed",
         inline=False
     )
     
@@ -822,32 +704,6 @@ async def coin_flip_pattern_predict_command(ctx):
             inline=False
         )
     
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="cfoutcome")
-async def predict_outcome_command(ctx):
-    """Predict next actual coin outcome based on won/lost results."""
-    pred, conf = predict_next_outcome()
-
-    embed = discord.Embed(
-        title="🎯 Outcome Prediction",
-        color=discord.Color.green()
-    )
-
-    embed.add_field(
-        name="Next Flip Likely Outcome",
-        value=f"**{pred}**",
-        inline=False
-    )
-
-    embed.add_field(
-        name="Confidence",
-        value=f"{conf}%",
-        inline=False
-    )
-
-    embed.set_footer(text="Based on actual coin outcomes (not your choices)")
     await ctx.send(embed=embed)
 
 
@@ -1073,7 +929,6 @@ async def on_message(message):
                 # After 25 flips, make the first prediction
                 if new_flip_count == MAX_FLIP_RESULTS:
                     analysis = analyze_coin_flip_probability()
-                    outcome_pred, outcome_conf = predict_next_outcome()
                     prediction_embed = discord.Embed(
                         title="🔮 First Prediction Made",
                         color=discord.Color.blue(),
@@ -1086,13 +941,8 @@ async def on_message(message):
                         inline=False
                     )
                     prediction_embed.add_field(
-                        name="Win-Rate Prediction",
+                        name="Prediction for Next Flip",
                         value=f"**{analysis['predicted'].upper()}** (Higher win rate)\nConfidence: {analysis['confidence']:.1f}%",
-                        inline=False
-                    )
-                    prediction_embed.add_field(
-                        name="🎯 Outcome Prediction",
-                        value=f"**{outcome_pred}**\nConfidence: {outcome_conf}%",
                         inline=False
                     )
                     await message.channel.send(embed=prediction_embed)
@@ -1134,7 +984,6 @@ async def on_message(message):
                     
                     # Make new prediction with updated data
                     analysis = analyze_coin_flip_probability()
-                    outcome_pred, outcome_conf = predict_next_outcome()
                     
                     new_pred_embed = discord.Embed(
                         title="🔮 New Prediction Made",
@@ -1142,18 +991,13 @@ async def on_message(message):
                     )
                     new_pred_embed.add_field(
                         name="Updated Statistics",
-                        value=f"Heads: {analysis['heads_wins']}/{analysis['heads_total']} wins ({analysis['heads_win_rate']:.1f}%)\n"
-                              f"Tails: {analysis['tails_wins']}/{analysis['tails_total']} wins ({analysis['tails_win_rate']:.1f}%)",
+                        value=f"Heads: {analysis['heads_count']} ({analysis['heads_prob']:.1f}%)\n"
+                              f"Tails: {analysis['tails_count']} ({analysis['tails_prob']:.1f}%)",
                         inline=False
                     )
                     new_pred_embed.add_field(
-                        name="Win-Rate Prediction",
+                        name="Prediction for Next Flip",
                         value=f"**{analysis['predicted'].upper()}**\nConfidence: {analysis['confidence']:.1f}%",
-                        inline=False
-                    )
-                    new_pred_embed.add_field(
-                        name="🎯 Outcome Prediction",
-                        value=f"**{outcome_pred}**\nConfidence: {outcome_conf}%",
                         inline=False
                     )
                     
@@ -1250,7 +1094,6 @@ async def on_message_edit(before, after):
             # After 20 flips, make the first prediction
             if new_flip_count == MAX_FLIP_RESULTS:
                 analysis = analyze_coin_flip_probability()
-                outcome_pred, outcome_conf = predict_next_outcome()
                 prediction_embed = discord.Embed(
                     title="🔮 First Prediction Made",
                     color=discord.Color.blue(),
@@ -1263,13 +1106,8 @@ async def on_message_edit(before, after):
                     inline=False
                 )
                 prediction_embed.add_field(
-                    name="Win-Rate Prediction",
+                    name="Prediction for Next Flip",
                     value=f"**{analysis['predicted'].upper()}** (Higher win rate)\nConfidence: {analysis['confidence']:.1f}%",
-                    inline=False
-                )
-                prediction_embed.add_field(
-                    name="🎯 Outcome Prediction",
-                    value=f"**{outcome_pred}**\nConfidence: {outcome_conf}%",
                     inline=False
                 )
                 await after.channel.send(embed=prediction_embed)
@@ -1307,7 +1145,6 @@ async def on_message_edit(before, after):
                 await after.channel.send(embed=result_embed)
                 
                 analysis = analyze_coin_flip_probability()
-                outcome_pred, outcome_conf = predict_next_outcome()
                 
                 new_pred_embed = discord.Embed(
                     title="🔮 New Prediction Made",
@@ -1320,13 +1157,8 @@ async def on_message_edit(before, after):
                     inline=False
                 )
                 new_pred_embed.add_field(
-                    name="Win-Rate Prediction",
+                    name="Prediction for Next Flip",
                     value=f"**{analysis['predicted'].upper()}** (Higher win rate)\nConfidence: {analysis['confidence']:.1f}%",
-                    inline=False
-                )
-                new_pred_embed.add_field(
-                    name="🎯 Outcome Prediction",
-                    value=f"**{outcome_pred}**\nConfidence: {outcome_conf}%",
                     inline=False
                 )
                 
